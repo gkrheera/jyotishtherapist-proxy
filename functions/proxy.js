@@ -1,9 +1,10 @@
 /**
- * JyotishTherapist Standalone API Proxy v4.1.0 (CORS Fix)
+ * JyotishTherapist Standalone API Proxy v4.2.0 (Final & Robust)
  *
- * This version adds explicit handling for preflight OPTIONS requests,
- * which is required by browsers for cross-origin POST requests. This
- * resolves the final CORS error.
+ * This version implements the definitive fix. The proxy is now solely
+ * responsible for all URL encoding, using the standard URLSearchParams
+ * object. This is a robust, best-practice solution that correctly
+ * handles all special characters.
  */
 
 let cachedToken = {
@@ -33,20 +34,19 @@ async function fetchToken(clientId, clientSecret) {
 }
 
 exports.handler = async function(event) {
-    // DEFINITIVE FIX: Handle preflight CORS requests from the browser.
+    // Handle preflight CORS requests.
     if (event.httpMethod === 'OPTIONS') {
         return {
-            statusCode: 204, // 204 No Content
+            statusCode: 204,
             headers: {
-                'Access-Control-Allow-Origin': '*', // Allow any origin
-                'Access-Control-Allow-Methods': 'POST, OPTIONS', // Allow these methods
-                'Access-Control-Allow-Headers': 'Content-Type', // Allow this header
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
             },
             body: '',
         };
     }
 
-    // This function now only accepts POST requests for data fetching.
     if (event.httpMethod !== 'POST') {
         return { 
             statusCode: 405, 
@@ -66,9 +66,10 @@ exports.handler = async function(event) {
             throw new Error('Request body must contain "endpoint" and "params".');
         }
 
-        const queryString = Object.entries(params)
-            .map(([key, value]) => `${key}=${value}`)
-            .join('&');
+        // DEFINITIVE FIX: Use URLSearchParams to robustly encode all parameters.
+        // This correctly handles '+' in datetime, commas in coordinates, etc.
+        const searchParams = new URLSearchParams(params);
+        const queryString = searchParams.toString();
         
         const targetUrl = `https://api.prokerala.com${endpoint}?${queryString}`;
 
@@ -83,17 +84,6 @@ exports.handler = async function(event) {
             'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
         };
 
-        if (apiResponse.ok) {
-            const jsonData = JSON.parse(data);
-            if (jsonData.status === 'error' && jsonData.errors) {
-                 return {
-                    statusCode: 400,
-                    headers: responseHeaders,
-                    body: JSON.stringify({ error: jsonData.errors[0].detail }),
-                };
-            }
-        }
-        
         return {
             statusCode: apiResponse.status,
             headers: responseHeaders,
