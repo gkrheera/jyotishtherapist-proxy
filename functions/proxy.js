@@ -1,57 +1,59 @@
 /**
- * JyotishTherapist Standalone API Proxy v5.0.0 (Reverted & Fixed)
+ * JyotishTherapist Standalone API Proxy v1.0.0
  *
- * This version reverts to the stable POST-based architecture and applies
- * the definitive fix for the API's data format error. It manually
- * constructs the query string to ensure the datetime parameter with its
- * literal '+' is sent exactly as the ProKerala API expects.
+ * This serverless function acts as a dedicated, secure proxy to the ProKerala API.
+ * It handles token management, securely adds API credentials, forwards requests,
+ * and manages CORS headers.
  */
 
+// A simple in-memory cache for the access token to improve performance.
 let cachedToken = {
     accessToken: null,
     expiresAt: 0,
 };
 
+/**
+ * Gets a valid OAuth 2.0 access token, using a cache to avoid unnecessary requests.
+ * @param {string} clientId Your ProKerala Client ID.
+ * @param {string} clientSecret Your ProKerala Client Secret.
+ * @returns {Promise<string>} The access token.
+ */
 async function fetchToken(clientId, clientSecret) {
+    // Return cached token if it's still valid for at least 5 more minutes.
     if (cachedToken.accessToken && cachedToken.expiresAt > Date.now() + 300 * 1000) {
         return cachedToken.accessToken;
     }
     if (!clientId || !clientSecret) {
-        throw new Error('API credentials are not configured.');
+        throw new Error('API credentials are not configured in the environment.');
     }
+
     const res = await fetch('https://api.prokerala.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`,
     });
+
     if (!res.ok) {
-        throw new Error('Failed to fetch token from ProKerala API.');
+        throw new Error('Failed to fetch token from ProKerala API. Check credentials.');
     }
     const data = await res.json();
     cachedToken.accessToken = data.access_token;
+    // Set expiry time to be slightly less than the actual expiry for a safety buffer.
     cachedToken.expiresAt = Date.now() + (data.expires_in - 300) * 1000;
     return cachedToken.accessToken;
 }
 
 exports.handler = async function(event) {
-    // Handle preflight CORS requests.
+    // Handle preflight CORS requests sent by browsers.
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 204,
             headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Origin': '*', // Or specify your frontend domain for better security
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
             },
             body: '',
-        };
-    }
-
-    if (event.httpMethod !== 'POST') {
-        return { 
-            statusCode: 405, 
-            body: 'Method Not Allowed',
-            headers: { 'Access-Control-Allow-Origin': '*' } 
         };
     }
 
@@ -59,41 +61,27 @@ exports.handler = async function(event) {
         const { CLIENT_ID, CLIENT_SECRET } = process.env;
         const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
         
-        const body = JSON.parse(event.body);
-        const { endpoint, params } = body;
-
-        if (!endpoint || !params) {
-            throw new Error('Request body must contain "endpoint" and "params".');
-        }
-
-        // DEFINITIVE FIX: Manually build the query string to handle the API's
-        // specific requirement for a literal '+' in the datetime.
-        const queryString = Object.entries(params)
-            .map(([key, value]) => {
-                // Pass datetime as-is, but encode other params like coordinates.
-                if (key === 'datetime') {
-                    return `${key}=${value}`;
-                }
-                return `${key}=${encodeURIComponent(value)}`;
-            })
-            .join('&');
+        // Extract the target API path and query string from the incoming request.
+        const prokeralaPath = event.path.replace('/.netlify/functions/proxy', '');
+        const queryString = event.rawQuery;
         
-        const targetUrl = `https://api.prokerala.com${endpoint}?${queryString}`;
+        const targetUrl = `https://api.prokerala.com${prokeralaPath}?${queryString}`;
 
         const apiResponse = await fetch(targetUrl, {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: {
+                'Authorization': `Bearer ${token}`,
+            }
         });
 
+        // Pass the response from the ProKerala API directly back to the client.
         const data = await apiResponse.text();
-        
-        const responseHeaders = {
-            'Access-Control-Allow-Origin': '*',
-            'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
-        };
 
         return {
             statusCode: apiResponse.status,
-            headers: responseHeaders,
+            headers: {
+                'Access-Control-Allow-Origin': '*', // Or specify your frontend domain
+                'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
+            },
             body: data,
         };
 
@@ -109,4 +97,3 @@ exports.handler = async function(event) {
         };
     }
 };
-
