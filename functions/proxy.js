@@ -1,10 +1,10 @@
 /**
- * JyotishTherapist Standalone API Proxy v4.2.0 (Final & Robust)
+ * JyotishTherapist Standalone API Proxy v5.0.0 (Reverted & Fixed)
  *
- * This version implements the definitive fix. The proxy is now solely
- * responsible for all URL encoding, using the standard URLSearchParams
- * object. This is a robust, best-practice solution that correctly
- * handles all special characters.
+ * This version reverts to the stable POST-based architecture and applies
+ * the definitive fix for the API's data format error. It manually
+ * constructs the query string to ensure the datetime parameter with its
+ * literal '+' is sent exactly as the ProKerala API expects.
  */
 
 let cachedToken = {
@@ -66,10 +66,17 @@ exports.handler = async function(event) {
             throw new Error('Request body must contain "endpoint" and "params".');
         }
 
-        // DEFINITIVE FIX: Use URLSearchParams to robustly encode all parameters.
-        // This correctly handles '+' in datetime, commas in coordinates, etc.
-        const searchParams = new URLSearchParams(params);
-        const queryString = searchParams.toString();
+        // DEFINITIVE FIX: Manually build the query string to handle the API's
+        // specific requirement for a literal '+' in the datetime.
+        const queryString = Object.entries(params)
+            .map(([key, value]) => {
+                // Pass datetime as-is, but encode other params like coordinates.
+                if (key === 'datetime') {
+                    return `${key}=${value}`;
+                }
+                return `${key}=${encodeURIComponent(value)}`;
+            })
+            .join('&');
         
         const targetUrl = `https://api.prokerala.com${endpoint}?${queryString}`;
 
