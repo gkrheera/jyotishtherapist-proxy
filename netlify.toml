@@ -1,0 +1,10 @@
+This file tells Netlify how to build and deploy the standalone proxy.
+[build]
+functions = "functions"
+
+This redirect rule makes the function's URL cleaner.
+It forwards all requests from the root URL of the site to the proxy function.
+[[redirects]]
+from = "/*"
+to = "/.netlify/functions/proxy/:splat"
+status = 200
