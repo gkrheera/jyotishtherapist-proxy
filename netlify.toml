@@ -2,5 +2,5 @@
 functions = "functions"
 [[redirects]]
 from = "/*"
-to = "/.netlify/functions/proxy?path=:splat"
+to = "/.netlify/functions/proxy?path=:splat&{query}"
 status = 200
