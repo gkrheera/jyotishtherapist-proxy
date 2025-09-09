@@ -1,5 +1,5 @@
 /**
- * JyotishTherapist Standalone API Proxy v8.0.0 (Final, Reverted & Verified)
+ * JyotishTherapist Standalone API Proxy v8.0.0 (Restored & Verified)
  *
  * This version reverts to the simplest possible proxy logic. It trusts that the
  * frontend is sending a perfectly formatted URL string and passes it directly
