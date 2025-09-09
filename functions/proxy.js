@@ -1,40 +1,30 @@
 /**
- * JyotishTherapist Standalone API Proxy v2.0.0 (Definitive Fix)
+ * JyotishTherapist Standalone API Proxy v3.0.0 (Verified Fix)
  *
- * This version works with a redirect rule that passes the original request
- * path as a query parameter named 'path'. This makes the proxy robust against
- * path information being lost by the redirect engine.
+ * This version uses the standard Netlify splat (*) rewrite pattern.
+ * It reliably gets the target API path by parsing event.path, which
+ * is the documented and correct way to handle rewrites.
  */
 
-// A simple in-memory cache for the access token to improve performance.
 let cachedToken = {
     accessToken: null,
     expiresAt: 0,
 };
 
-/**
- * Gets a valid OAuth 2.0 access token, using a cache to avoid unnecessary requests.
- * @param {string} clientId Your ProKerala Client ID.
- * @param {string} clientSecret Your ProKerala Client Secret.
- * @returns {Promise<string>} The access token.
- */
 async function fetchToken(clientId, clientSecret) {
-    // Return cached token if it's still valid for at least 5 more minutes.
     if (cachedToken.accessToken && cachedToken.expiresAt > Date.now() + 300 * 1000) {
         return cachedToken.accessToken;
     }
     if (!clientId || !clientSecret) {
-        throw new Error('API credentials are not configured in the environment.');
+        throw new Error('API credentials are not configured.');
     }
-
     const res = await fetch('https://api.prokerala.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`,
     });
-
     if (!res.ok) {
-        throw new Error('Failed to fetch token from ProKerala API. Check credentials.');
+        throw new Error('Failed to fetch token from ProKerala API.');
     }
     const data = await res.json();
     cachedToken.accessToken = data.access_token;
@@ -43,7 +33,6 @@ async function fetchToken(clientId, clientSecret) {
 }
 
 exports.handler = async function(event) {
-    // Handle preflight CORS requests.
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 204,
@@ -60,23 +49,22 @@ exports.handler = async function(event) {
         const { CLIENT_ID, CLIENT_SECRET } = process.env;
         const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
         
-        // The new redirect rule provides the original path in the 'path' query parameter.
-        const { path, ...queryParams } = event.queryStringParameters;
+        // DEFINITIVE FIX: Extract the target path from the function's invocation path.
+        // event.path will be like '/.netlify/functions/proxy/v2/astrology/kundli'
+        // We need to extract the part after the function name.
+        const pathPrefix = '/.netlify/functions/proxy/';
+        const prokeralaPath = event.path.startsWith(pathPrefix) ? event.path.substring(pathPrefix.length) : null;
 
-        if (!path) {
-            throw new Error("Target API path is missing. Check the redirect rule in netlify.toml is correct.");
+        if (!prokeralaPath) {
+             throw new Error(`Could not determine the target API path from the event path: ${event.path}`);
         }
 
-        // Reconstruct the query string for ProKerala from the remaining parameters.
-        const prokeralaQueryString = Object.entries(queryParams)
-            .map(([key, value]) => `${key}=${value}`)
-            .join('&');
+        const queryString = event.rawQuery;
         
         // The query string from Netlify will have decoded '%2B' to a '+'. We must re-encode it.
-        const correctedQueryString = prokeralaQueryString.replace(/\+/g, '%2B');
+        const correctedQueryString = queryString.replace(/\+/g, '%2B');
 
-        // The 'path' from the splat does not include a leading '/', so we add it.
-        const targetUrl = `https://api.prokerala.com/${path}?${correctedQueryString}`;
+        const targetUrl = `https://api.prokerala.com/${prokeralaPath}?${correctedQueryString}`;
 
         const apiResponse = await fetch(targetUrl, {
             headers: { 'Authorization': `Bearer ${token}` }
