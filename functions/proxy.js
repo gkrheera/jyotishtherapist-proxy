@@ -1,9 +1,10 @@
 /**
- * JyotishTherapist Standalone API Proxy v1.0.0
+ * JyotishTherapist Standalone API Proxy v1.1.0
  *
  * This serverless function acts as a dedicated, secure proxy to the ProKerala API.
  * It handles token management, securely adds API credentials, forwards requests,
  * and manages CORS headers.
+ * v1.1.0: Adds re-encoding of '+' to '%2B' to counteract decoding by the redirect rule.
  */
 
 // A simple in-memory cache for the access token to improve performance.
@@ -65,7 +66,12 @@ exports.handler = async function(event) {
         const prokeralaPath = event.path.replace('/.netlify/functions/proxy', '');
         const queryString = event.rawQuery;
         
-        const targetUrl = `https://api.prokerala.com${prokeralaPath}?${queryString}`;
+        // DEFINITIVE FIX: Netlify's redirect engine may decode '%2B' to a '+'.
+        // Before the final fetch, we must re-encode any '+' characters in the query
+        // string back to '%2B' to ensure the ProKerala API receives it correctly.
+        const correctedQueryString = queryString.replace(/\+/g, '%2B');
+
+        const targetUrl = `https://api.prokerala.com${prokeralaPath}?${correctedQueryString}`;
 
         const apiResponse = await fetch(targetUrl, {
             headers: {
