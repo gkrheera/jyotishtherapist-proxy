@@ -1,9 +1,9 @@
 /**
- * JyotishTherapist Standalone API Proxy v3.0.0 (Verified Fix)
+ * JyotishTherapist Standalone API Proxy v4.0.0 (POST-based)
  *
- * This version uses the standard Netlify splat (*) rewrite pattern.
- * It reliably gets the target API path by parsing event.path, which
- * is the documented and correct way to handle rewrites.
+ * This version uses a robust POST-based architecture. The frontend sends
+ * the target endpoint and parameters in a JSON body, which completely
+ * avoids all URL encoding and redirect issues.
  */
 
 let cachedToken = {
@@ -33,38 +33,30 @@ async function fetchToken(clientId, clientSecret) {
 }
 
 exports.handler = async function(event) {
-    if (event.httpMethod === 'OPTIONS') {
-        return {
-            statusCode: 204,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            },
-            body: '',
-        };
+    // This function now only accepts POST requests.
+    if (event.httpMethod !== 'POST') {
+        return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
     try {
         const { CLIENT_ID, CLIENT_SECRET } = process.env;
         const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
         
-        // DEFINITIVE FIX: Extract the target path from the function's invocation path.
-        // event.path will be like '/.netlify/functions/proxy/v2/astrology/kundli'
-        // We need to extract the part after the function name.
-        const pathPrefix = '/.netlify/functions/proxy/';
-        const prokeralaPath = event.path.startsWith(pathPrefix) ? event.path.substring(pathPrefix.length) : null;
+        // Parse the JSON body sent from the frontend.
+        const body = JSON.parse(event.body);
+        const { endpoint, params } = body;
 
-        if (!prokeralaPath) {
-             throw new Error(`Could not determine the target API path from the event path: ${event.path}`);
+        if (!endpoint || !params) {
+            throw new Error('Request body must contain "endpoint" and "params".');
         }
 
-        const queryString = event.rawQuery;
+        // Construct the query string from the params object.
+        const queryString = Object.entries(params)
+            .map(([key, value]) => `${key}=${value}`)
+            .join('&');
         
-        // The query string from Netlify will have decoded '%2B' to a '+'. We must re-encode it.
-        const correctedQueryString = queryString.replace(/\+/g, '%2B');
-
-        const targetUrl = `https://api.prokerala.com/${prokeralaPath}?${correctedQueryString}`;
+        // The frontend now sends the correctly pre-encoded datetime string.
+        const targetUrl = `https://api.prokerala.com${endpoint}?${queryString}`;
 
         const apiResponse = await fetch(targetUrl, {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -72,6 +64,18 @@ exports.handler = async function(event) {
 
         const data = await apiResponse.text();
 
+        // ProKerala API can return 200 OK with an error message, so we check the body.
+        if (apiResponse.ok) {
+            const jsonData = JSON.parse(data);
+            if (jsonData.status === 'error') {
+                 return {
+                    statusCode: 400, // Or another appropriate error code
+                    headers: { 'Access-Control-Allow-Origin': '*' },
+                    body: JSON.stringify({ error: jsonData.errors[0].detail }),
+                };
+            }
+        }
+        
         return {
             statusCode: apiResponse.status,
             headers: {
