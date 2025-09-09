@@ -1,9 +1,9 @@
 /**
- * JyotishTherapist Standalone API Proxy v4.0.0 (POST-based)
+ * JyotishTherapist Standalone API Proxy v4.1.0 (CORS Fix)
  *
- * This version uses a robust POST-based architecture. The frontend sends
- * the target endpoint and parameters in a JSON body, which completely
- * avoids all URL encoding and redirect issues.
+ * This version adds explicit handling for preflight OPTIONS requests,
+ * which is required by browsers for cross-origin POST requests. This
+ * resolves the final CORS error.
  */
 
 let cachedToken = {
@@ -33,16 +33,32 @@ async function fetchToken(clientId, clientSecret) {
 }
 
 exports.handler = async function(event) {
-    // This function now only accepts POST requests.
+    // DEFINITIVE FIX: Handle preflight CORS requests from the browser.
+    if (event.httpMethod === 'OPTIONS') {
+        return {
+            statusCode: 204, // 204 No Content
+            headers: {
+                'Access-Control-Allow-Origin': '*', // Allow any origin
+                'Access-Control-Allow-Methods': 'POST, OPTIONS', // Allow these methods
+                'Access-Control-Allow-Headers': 'Content-Type', // Allow this header
+            },
+            body: '',
+        };
+    }
+
+    // This function now only accepts POST requests for data fetching.
     if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: 'Method Not Allowed' };
+        return { 
+            statusCode: 405, 
+            body: 'Method Not Allowed',
+            headers: { 'Access-Control-Allow-Origin': '*' } 
+        };
     }
 
     try {
         const { CLIENT_ID, CLIENT_SECRET } = process.env;
         const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
         
-        // Parse the JSON body sent from the frontend.
         const body = JSON.parse(event.body);
         const { endpoint, params } = body;
 
@@ -50,12 +66,10 @@ exports.handler = async function(event) {
             throw new Error('Request body must contain "endpoint" and "params".');
         }
 
-        // Construct the query string from the params object.
         const queryString = Object.entries(params)
             .map(([key, value]) => `${key}=${value}`)
             .join('&');
         
-        // The frontend now sends the correctly pre-encoded datetime string.
         const targetUrl = `https://api.prokerala.com${endpoint}?${queryString}`;
 
         const apiResponse = await fetch(targetUrl, {
@@ -63,14 +77,18 @@ exports.handler = async function(event) {
         });
 
         const data = await apiResponse.text();
+        
+        const responseHeaders = {
+            'Access-Control-Allow-Origin': '*',
+            'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
+        };
 
-        // ProKerala API can return 200 OK with an error message, so we check the body.
         if (apiResponse.ok) {
             const jsonData = JSON.parse(data);
-            if (jsonData.status === 'error') {
+            if (jsonData.status === 'error' && jsonData.errors) {
                  return {
-                    statusCode: 400, // Or another appropriate error code
-                    headers: { 'Access-Control-Allow-Origin': '*' },
+                    statusCode: 400,
+                    headers: responseHeaders,
                     body: JSON.stringify({ error: jsonData.errors[0].detail }),
                 };
             }
@@ -78,10 +96,7 @@ exports.handler = async function(event) {
         
         return {
             statusCode: apiResponse.status,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
-            },
+            headers: responseHeaders,
             body: data,
         };
 
