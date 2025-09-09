@@ -1,10 +1,10 @@
 /**
- * JyotishTherapist Standalone API Proxy v6.0.0 (Final, Verified)
+ * JyotishTherapist Standalone API Proxy v8.0.0 (Final, Reverted & Verified)
  *
- * This version aligns with the official ProKerala API examples. It uses
- * a simple GET request architecture and correctly reconstructs the URL
- * inside the proxy to handle the API's specific encoding requirements.
- * This is the definitive and correct solution.
+ * This version reverts to the simplest possible proxy logic. It trusts that the
+ * frontend is sending a perfectly formatted URL string and passes it directly
+ * to the ProKerala API without any modification. This is the most robust way
+ * to handle the API's non-standard encoding requirements.
  */
 
 let cachedToken = {
@@ -34,15 +34,11 @@ async function fetchToken(clientId, clientSecret) {
 }
 
 exports.handler = async function(event) {
-    // This function handles CORS automatically for simple GET requests.
     try {
         const { CLIENT_ID, CLIENT_SECRET } = process.env;
         const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
         
-        // The path comes from the redirect rule's splat.
         const path = event.path.replace('/.netlify/functions/proxy', '');
-        
-        // The raw query string from the original request.
         const queryString = event.rawQuery;
 
         if (!path) {
@@ -58,7 +54,6 @@ exports.handler = async function(event) {
         const data = await apiResponse.text();
         
         const responseHeaders = {
-            // Allow requests from any origin.
             'Access-Control-Allow-Origin': '*',
             'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
         };
