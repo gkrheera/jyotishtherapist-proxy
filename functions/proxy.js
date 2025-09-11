@@ -1,79 +1,61 @@
-/**
- * JyotishTherapist Standalone API Proxy v8.0.0 (Restored & Verified)
- *
- * This version reverts to the simplest possible proxy logic. It trusts that the
- * frontend is sending a perfectly formatted URL string and passes it directly
- * to the ProKerala API without any modification. This is the most robust way
- * to handle the API's non-standard encoding requirements.
- */
+const fetch = require('node-fetch');
 
-let cachedToken = {
-    accessToken: null,
-    expiresAt: 0,
-};
+exports.handler = async function(event, context) {
+    const { endpoint, ...params } = event.queryStringParameters;
 
-async function fetchToken(clientId, clientSecret) {
-    if (cachedToken.accessToken && cachedToken.expiresAt > Date.now() + 300 * 1000) {
-        return cachedToken.accessToken;
-    }
-    if (!clientId || !clientSecret) {
-        throw new Error('API credentials are not configured.');
-    }
-    const res = await fetch('https://api.prokerala.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to fetch token from ProKerala API.');
-    }
-    const data = await res.json();
-    cachedToken.accessToken = data.access_token;
-    cachedToken.expiresAt = Date.now() + (data.expires_in - 300) * 1000;
-    return cachedToken.accessToken;
-}
+    // IMPORTANT: Store your API credentials securely as environment variables
+    const CLIENT_ID = process.env.PROKERALA_CLIENT_ID;
+    const CLIENT_SECRET = process.env.PROKERALA_CLIENT_SECRET;
 
-exports.handler = async function(event) {
+    if (!CLIENT_ID || !CLIENT_SECRET) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "API credentials are not configured on the server." }),
+        };
+    }
+
+    if (!endpoint) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: "API endpoint is required." }),
+        };
+    }
+
+    const API_HOST = "https://api.prokerala.com/v2/astrology";
+    const auth = "Basic " + Buffer.from(CLIENT_ID + ":" + CLIENT_SECRET).toString("base64");
+
+    const queryString = new URLSearchParams(params).toString();
+    const url = `${API_HOST}/${endpoint}?${queryString}`;
+    
     try {
-        const { CLIENT_ID, CLIENT_SECRET } = process.env;
-        const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
-        
-        const path = event.path.replace('/.netlify/functions/proxy', '');
-        const queryString = event.rawQuery;
-
-        if (!path) {
-            throw new Error("Target API path is missing.");
-        }
-
-        const targetUrl = `https://api.prokerala.com${path}?${queryString}`;
-
-        const apiResponse = await fetch(targetUrl, {
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': auth,
+                'Content-Type': 'application/json'
+            }
         });
 
-        const data = await apiResponse.text();
+        const data = await response.json();
         
-        const responseHeaders = {
-            'Access-Control-Allow-Origin': '*',
-            'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
-        };
-
+        // Forward the status code from the target API
         return {
-            statusCode: apiResponse.status,
-            headers: responseHeaders,
-            body: data,
+            statusCode: response.status,
+            headers: {
+                "Access-Control-Allow-Origin": "*", // Allow requests from any origin
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data)
         };
 
-    } catch (e) {
-        console.error("Proxy Function Error:", e.message);
+    } catch (error) {
+        console.error("Error in proxy function:", error);
         return {
             statusCode: 500,
             headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'application/json',
+                "Access-Control-Allow-Origin": "*",
             },
-            body: JSON.stringify({ error: e.message }),
+            body: JSON.stringify({ error: "An internal server error occurred.", details: error.message }),
         };
     }
 };
-
