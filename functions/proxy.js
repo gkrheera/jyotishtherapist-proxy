@@ -3,8 +3,9 @@ const fetch = require('node-fetch');
 exports.handler = async function(event, context) {
     const params = event.queryStringParameters;
     
-    // FIX: Read the endpoint from the 'path' parameter sent by the redirect rule.
-    const path = params.path;
+    // FIX: Reverted to the original, more reliable method of getting the endpoint.
+    // This reads the path directly from the invocation event.
+    const path = event.path.split('/.netlify/functions/proxy')[1];
 
     const CLIENT_ID = process.env.PROKERALA_CLIENT_ID;
     const CLIENT_SECRET = process.env.PROKERALA_CLIENT_SECRET;
@@ -16,23 +17,18 @@ exports.handler = async function(event, context) {
         };
     }
 
-    // FIX: Check for the 'path' variable instead of 'endpoint'.
     if (!path || path.trim() === '') {
         return {
             statusCode: 400,
             body: JSON.stringify({ error: "API endpoint is required." }),
         };
     }
-    
-    // Remove the 'path' parameter itself so it's not sent to the ProKerala API.
-    delete params.path;
 
     const API_HOST = "https://api.prokerala.com";
     const auth = "Basic " + Buffer.from(CLIENT_ID + ":" + CLIENT_SECRET).toString("base64");
 
     const queryString = new URLSearchParams(params).toString();
-    // Construct the URL with the path from the redirect.
-    const url = `${API_HOST}/${path}?${queryString}`;
+    const url = `${API_HOST}${path}?${queryString}`;
     
     try {
         const response = await fetch(url, {
