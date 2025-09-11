@@ -1,7 +1,11 @@
 const fetch = require('node-fetch');
 
 exports.handler = async function(event, context) {
-    const { endpoint, ...params } = event.queryStringParameters;
+    // All parameters from the original request are here
+    const params = event.queryStringParameters;
+    
+    // The captured path from the redirect rule is now in `params.path`
+    const path = params.path;
 
     // IMPORTANT: Store your API credentials securely as environment variables
     const CLIENT_ID = process.env.PROKERALA_CLIENT_ID;
@@ -14,18 +18,23 @@ exports.handler = async function(event, context) {
         };
     }
 
-    if (!endpoint) {
+    // Check if the path was successfully passed
+    if (!path || path.trim() === '') {
         return {
             statusCode: 400,
-            body: JSON.stringify({ error: "API endpoint is required." }),
+            body: JSON.stringify({ error: "API endpoint path is required." }),
         };
     }
+    
+    // Remove the 'path' parameter itself so it's not sent to the ProKerala API
+    delete params.path;
 
-    const API_HOST = "https://api.prokerala.com/v2/astrology";
+    const API_HOST = "https://api.prokerala.com";
     const auth = "Basic " + Buffer.from(CLIENT_ID + ":" + CLIENT_SECRET).toString("base64");
 
     const queryString = new URLSearchParams(params).toString();
-    const url = `${API_HOST}/${endpoint}?${queryString}`;
+    // Construct the URL with the path from the redirect
+    const url = `${API_HOST}/${path}?${queryString}`;
     
     try {
         const response = await fetch(url, {
@@ -38,11 +47,10 @@ exports.handler = async function(event, context) {
 
         const data = await response.json();
         
-        // Forward the status code from the target API
         return {
             statusCode: response.status,
             headers: {
-                "Access-Control-Allow-Origin": "*", // Allow requests from any origin
+                "Access-Control-Allow-Origin": "*",
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(data)
