@@ -1,6 +1,12 @@
 [build]
-functions = "functions"
+  functions = "functions"
+
 [[redirects]]
-from = "/*"
-to = "/.netlify/functions/proxy/:splat"
-status = 200
+  # The path the frontend will call
+  from = "/api/*"
+  # The actual function to execute
+  to = "/.netlify/functions/proxy"
+  # A 200 status means this is a rewrite, not a redirect.
+  status = 200
+  # Force this rule to run even if a file exists at the path.
+  force = true
