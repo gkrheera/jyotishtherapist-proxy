@@ -1,15 +1,6 @@
-# This file provides the essential build configuration and the rewrite
-# rule that directs all API traffic to our serverless function.
-
 [build]
-  # Specifies the directory where Netlify will find the serverless functions.
-  functions = "functions"
-
-# This rewrite rule is crucial. It ensures any request made from the frontend
-# to a path starting with "/api/" is internally forwarded to the proxy function
-# without the user seeing a redirect.
+functions = "functions"
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/proxy/:splat"
-  status = 200 # A 200 status indicates a rewrite, not a permanent redirect.
-  force = true # Ensures this rule runs even if a file exists at the path.
+from = "/*"
+to = "/.netlify/functions/proxy/:splat"
+status = 200
