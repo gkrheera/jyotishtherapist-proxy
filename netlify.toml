@@ -7,7 +7,7 @@
 
 [[redirects]]
   # The path the frontend will call
-  from = "/api/*"
+  from = "/*"
   # The actual function to execute. The ":splat" ensures the path is passed correctly.
   to = "/.netlify/functions/proxy/:splat"
   # A 200 status means this is a rewrite, not a redirect.
