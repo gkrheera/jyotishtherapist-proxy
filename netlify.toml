@@ -1,11 +1,15 @@
+# This file configures the redirect/rewrite rule for the proxy.
+# It tells Netlify to send any request to a path starting with /api/
+# to our single proxy.js serverless function.
+
 [build]
   functions = "functions"
 
 [[redirects]]
   # The path the frontend will call
   from = "/api/*"
-  # The actual function to execute
-  to = "/.netlify/functions/proxy"
+  # The actual function to execute. The ":splat" ensures the path is passed correctly.
+  to = "/.netlify/functions/proxy/:splat"
   # A 200 status means this is a rewrite, not a redirect.
   status = 200
   # Force this rule to run even if a file exists at the path.
