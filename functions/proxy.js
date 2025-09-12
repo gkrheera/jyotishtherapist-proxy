@@ -1,78 +1,146 @@
 /**
- * JyotishTherapist Standalone API Proxy v8.0.0 (Restored & Verified)
+ * CORRECTED PROXY FUNCTION (functions/proxy.js)
+ * This function is now fully compatible with the Prokerala API specification.
  *
- * This version reverts to the simplest possible proxy logic. It trusts that the
- * frontend is sending a perfectly formatted URL string and passes it directly
- * to the ProKerala API without any modification. This is the most robust way
- * to handle the API's non-standard encoding requirements.
+ * It correctly implements the OAuth2 client credentials flow to get an access token
+ * and then uses that token in the Authorization header for API requests.
+ * It also handles token caching to improve performance.
  */
 
-let cachedToken = {
+// Use URLSearchParams for easier query string management
+const { URLSearchParams } = require('url');
+
+const TOKEN_ENDPOINT = 'https://api.prokerala.com/token';
+const API_BASE_URL = 'https://api.prokerala.com/v2';
+
+// In-memory cache for the access token. In a real-world, scalable application,
+// you might use a more persistent cache like Redis or a database.
+let tokenCache = {
     accessToken: null,
-    expiresAt: 0,
+    expiresAt: null,
 };
 
-async function fetchToken(clientId, clientSecret) {
-    if (cachedToken.accessToken && cachedToken.expiresAt > Date.now() + 300 * 1000) {
-        return cachedToken.accessToken;
-    }
+/**
+ * Fetches a new OAuth2 access token from the Prokerala token endpoint.
+ * This should only be called when we don't have a valid cached token.
+ */
+async function getNewAccessToken() {
+    const clientId = process.env.PROKERALA_CLIENT_ID;
+    const clientSecret = process.env.PROKERALA_CLIENT_SECRET;
+
     if (!clientId || !clientSecret) {
-        throw new Error('API credentials are not configured.');
+        console.error("Client ID or Client Secret is not configured in environment variables.");
+        return null;
     }
-    const res = await fetch('https://api.prokerala.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `grant_type=client_credentials&client_id=${clientId}&client_secret=${clientSecret}`,
-    });
-    if (!res.ok) {
-        throw new Error('Failed to fetch token from ProKerala API.');
-    }
-    const data = await res.json();
-    cachedToken.accessToken = data.access_token;
-    cachedToken.expiresAt = Date.now() + (data.expires_in - 300) * 1000;
-    return cachedToken.accessToken;
-}
 
-exports.handler = async function(event) {
+    const params = new URLSearchParams();
+    params.append('grant_type', 'client_credentials');
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+
     try {
-        const { CLIENT_ID, CLIENT_SECRET } = process.env;
-        const token = await fetchToken(CLIENT_ID, CLIENT_SECRET);
-        
-        const path = event.path.replace('/.netlify/functions/proxy', '');
-        const queryString = event.rawQuery;
-
-        if (!path) {
-            throw new Error("Target API path is missing.");
-        }
-
-        const targetUrl = `https://api.prokerala.com${path}?${queryString}`;
-
-        const apiResponse = await fetch(targetUrl, {
-            headers: { 'Authorization': `Bearer ${token}` }
+        const response = await fetch(TOKEN_ENDPOINT, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params,
         });
 
-        const data = await apiResponse.text();
-        
-        const responseHeaders = {
-            'Access-Control-Allow-Origin': '*',
-            'Content-Type': apiResponse.headers.get('Content-Type') || 'application/json',
-        };
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Token request failed with status ${response.status}:`, errorText);
+            return null;
+        }
 
+        const data = await response.json();
+        const now = new Date();
+        // Set expiry time a little earlier (e.g., 5 minutes) to be safe
+        const expiresAt = new Date(now.getTime() + (data.expires_in - 300) * 1000);
+
+        console.log("Successfully fetched new access token.");
         return {
-            statusCode: apiResponse.status,
-            headers: responseHeaders,
-            body: data,
+            accessToken: data.access_token,
+            expiresAt: expiresAt,
         };
+    } catch (error) {
+        console.error("Error fetching access token:", error);
+        return null;
+    }
+}
 
-    } catch (e) {
-        console.error("Proxy Function Error:", e.message);
+/**
+ * Main handler function for the serverless proxy.
+ */
+exports.handler = async (event) => {
+    // Check if the cached token is still valid
+    if (!tokenCache.accessToken || new Date() >= tokenCache.expiresAt) {
+        console.log("Token is expired or not available. Fetching a new one.");
+        tokenCache = await getNewAccessToken();
+    }
+
+    if (!tokenCache || !tokenCache.accessToken) {
         return {
             statusCode: 500,
+            body: JSON.stringify({ error: "Could not retrieve API access token." }),
+        };
+    }
+
+    // The frontend should specify which API endpoint it wants to call.
+    // e.g., /astrology/panchang
+    const requestedEndpoint = event.queryStringParameters.endpoint;
+    if (!requestedEndpoint) {
+        return {
+            statusCode: 400,
+            body: JSON.stringify({ error: "API endpoint parameter is missing." }),
+        };
+    }
+
+    // Create a new URLSearchParams object, removing our custom 'endpoint' param
+    const originalParams = new URLSearchParams(event.queryStringParameters);
+    originalParams.delete('endpoint');
+
+    const finalApiUrl = `${API_BASE_URL}${requestedEndpoint}?${originalParams.toString()}`;
+
+    console.log(`[Proxy] Making authenticated request to: ${finalApiUrl}`);
+
+    try {
+        const apiResponse = await fetch(finalApiUrl, {
             headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Content-Type': 'application/json',
+                // Correctly use the Bearer token in the Authorization header
+                Authorization: `Bearer ${tokenCache.accessToken}`,
             },
-            body: JSON.stringify({ error: e.message }),
+        });
+
+        const contentType = apiResponse.headers.get('content-type');
+
+        // Gracefully handle non-JSON error pages from the API
+        if (!apiResponse.ok || !contentType || !contentType.includes('application/json')) {
+            const errorBody = await apiResponse.text();
+            console.error(`[Proxy] API returned a non-OK or non-JSON response. Status: ${apiResponse.status}`);
+            console.error("[Proxy] Raw Error Body:", errorBody);
+            return {
+                statusCode: apiResponse.status,
+                body: JSON.stringify({
+                    error: "Received an invalid response from the ProKerala API.",
+                    details: errorBody.substring(0, 500) + '...' // Truncate long HTML errors
+                }),
+            };
+        }
+
+        const data = await apiResponse.json();
+
+        return {
+            statusCode: 200,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        };
+
+    } catch (error) {
+        console.error('[Proxy] Critical error during API fetch:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: 'An internal server error occurred in the proxy.' }),
         };
     }
 };
