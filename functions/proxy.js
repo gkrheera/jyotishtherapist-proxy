@@ -1,9 +1,11 @@
 const fetch = require('node-fetch');
 
 exports.handler = async function(event, context) {
-    // **DEFINITIVE FIX**: This logic correctly gets the endpoint from the query string.
-    // The frontend sends `?endpoint=v2/location/geo-details&...`
-    const { endpoint, ...params } = event.queryStringParameters;
+    const params = event.queryStringParameters;
+    
+    // **DEFINITIVE FIX**: This logic reliably gets the endpoint from the event path,
+    // which is correctly populated by the netlify.toml redirect rule.
+    const endpoint = event.path.replace('/.netlify/functions/proxy', '');
 
     const CLIENT_ID = process.env.PROKERALA_CLIENT_ID;
     const CLIENT_SECRET = process.env.PROKERALA_CLIENT_SECRET;
@@ -15,8 +17,7 @@ exports.handler = async function(event, context) {
         };
     }
 
-    // This check now works correctly because 'endpoint' is sent directly by the frontend.
-    if (!endpoint) {
+    if (!endpoint || endpoint.trim() === '') {
         return {
             statusCode: 400,
             body: JSON.stringify({ error: "API endpoint is required." }),
@@ -27,8 +28,7 @@ exports.handler = async function(event, context) {
     const auth = "Basic " + Buffer.from(CLIENT_ID + ":" + CLIENT_SECRET).toString("base64");
 
     const queryString = new URLSearchParams(params).toString();
-    // The endpoint is a full path like 'v2/location/geo-details'
-    const url = `${API_HOST}/${endpoint}?${queryString}`;
+    const url = `${API_HOST}${endpoint}?${queryString}`;
     
     try {
         const response = await fetch(url, {
@@ -44,8 +44,7 @@ exports.handler = async function(event, context) {
         return {
             statusCode: response.status,
             headers: {
-                // Required for the browser to allow the request from your frontend site.
-                "Access-Control-Allow-Origin": "*", 
+                "Access-Control-Allow-Origin": "*",
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(data)
@@ -62,4 +61,3 @@ exports.handler = async function(event, context) {
         };
     }
 };
-
