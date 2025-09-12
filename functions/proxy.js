@@ -1,11 +1,9 @@
 const fetch = require('node-fetch');
 
 exports.handler = async function(event, context) {
-    const params = event.queryStringParameters;
-    
-    // FIX: Reverted to the original, more reliable method of getting the endpoint.
-    // This reads the path directly from the invocation event.
-    const path = event.path.split('/.netlify/functions/proxy')[1];
+    // **DEFINITIVE FIX**: This logic correctly gets the endpoint from the query string.
+    // The frontend sends `?endpoint=v2/location/geo-details&...`
+    const { endpoint, ...params } = event.queryStringParameters;
 
     const CLIENT_ID = process.env.PROKERALA_CLIENT_ID;
     const CLIENT_SECRET = process.env.PROKERALA_CLIENT_SECRET;
@@ -17,7 +15,8 @@ exports.handler = async function(event, context) {
         };
     }
 
-    if (!path || path.trim() === '') {
+    // This check now works correctly because 'endpoint' is sent directly by the frontend.
+    if (!endpoint) {
         return {
             statusCode: 400,
             body: JSON.stringify({ error: "API endpoint is required." }),
@@ -28,7 +27,8 @@ exports.handler = async function(event, context) {
     const auth = "Basic " + Buffer.from(CLIENT_ID + ":" + CLIENT_SECRET).toString("base64");
 
     const queryString = new URLSearchParams(params).toString();
-    const url = `${API_HOST}${path}?${queryString}`;
+    // The endpoint is a full path like 'v2/location/geo-details'
+    const url = `${API_HOST}/${endpoint}?${queryString}`;
     
     try {
         const response = await fetch(url, {
@@ -44,7 +44,8 @@ exports.handler = async function(event, context) {
         return {
             statusCode: response.status,
             headers: {
-                "Access-Control-Allow-Origin": "*",
+                // Required for the browser to allow the request from your frontend site.
+                "Access-Control-Allow-Origin": "*", 
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(data)
